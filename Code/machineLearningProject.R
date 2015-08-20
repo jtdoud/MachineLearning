@@ -2,13 +2,14 @@
 # Title:    Practical Machine Learning Course Project
 # Author:   Tucker Doud
 # Date:     August 9, 2015
-# Notes:    Don't forget to split data befor EDA.
-#           Recode to use only numeric indicies.
 
 # Set up
 setwd("~/GitHub/MachineLearning")
 library(caret)
+library(ipred)
+library(plyr)
 dat <- read.csv("./Data/pml-training.csv", stringsAsFactors = F)
+dat$classe <- factor(dat$classe)
 
 # Partition
 inTrain <- createDataPartition(y = dat$classe, p = 0.8, list = F)
@@ -43,15 +44,43 @@ countNA <- function(col){
 sapply(X = trainDat[, iNum], FUN = countNA) # Lots of NAs in summarized variables
 
 # Keep numeric with 0 NAs
-iMdl <- sapply(X = trainDat[, iNum], FUN = countNA)
-iMdl <- names(iMdl[which(iMdl == 0)])
-str(trainDat[, iMdl])
+iPred <- sapply(X = trainDat[, iNum], FUN = countNA)
+iPred <- names(iPred[which(iPred == 0)])
+str(trainDat[, iPred])
 
-# Remove meta trainData and add outcome
-iMdl <- iMdl[-c(1:4)]
-iMdl <- append(x = iMdl, values = "classe") # Final variables to use!
+# Remove meta data from trainData and add outcome
+iPred <- iPred[-c(1:4)] # Final predictors to use!
+
+rm(dat, inTrain, cls, iChar, iNum, countNA, findBlank, findError)
 
 # Model building
-mdl <- trainDat[, iMdl]
-nzv <- nearZeroVar(x = mdl[, -53], saveMetrics = T)
-mdlFit <- train(classe ~ ., method = "rpart", data = mdl)
+nzv <- nearZeroVar(x = trainDat[, iPred], saveMetrics = T)
+
+# tmp <- trainDat[sample(1:15699, size = 1000, replace = F), ] # Test on small size
+
+library(doParallel)
+registerDoParallel(cores=4)
+ctrl <- trainControl(number = 10, returnData = F, savePredictions = F, trim = T)
+mdlFit <- train(x = trainDat[, iPred], y = trainDat[, "classe"], method = "treebag",
+                trControl = ctrl, allowParallel = T)
+save(mdlFit, file = "./Code/mdlFit.Rdata", compress = T)
+
+# Test model on Testing data
+pred <- predict(mdlFit, newdata = testDat)
+confusionMatrix(data = pred, reference = testDat$classe)
+
+# Test model on assignment sample
+finalTest <- read.csv("./Data/pml-testing.csv", stringsAsFactors = F)
+finalPred <- predict(mdlFit, newdata = finalTest)
+finalPred <- as.character(finalPred)
+
+# Submission Files
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+setwd("~/GitHub/MachineLearning/Submission")
+pml_write_files(finalPred)
