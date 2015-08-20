@@ -1,0 +1,98 @@
+---
+title: "Practical Machine Learning Project"
+author: "Tucker Doud"
+date: "August 19, 2015"
+output: html_document
+---
+
+# Introduction
+The purpose of this project is to build a statistical model that will accuratetly predict the outcome class of a weightlifting excercise. The data used for model building was collected by fitting subjects with sensors and collecting the sensor data while they performed the excercise in five different ways. One way was a correct execution (class A) and the remaining four ways were performed while making common mistakes (classes B,C,D and E.) More information about how the experiment and how the data was collected can be found [HERE.](http://groupware.les.inf.puc-rio.br/har)
+
+# Exploratory Data Analysis
+```{r echo=FALSE, message=FALSE}
+# Set up
+setwd("~/GitHub/MachineLearning")
+library(caret)
+library(ipred)
+library(plyr)
+dat <- read.csv("./Data/pml-training.csv", stringsAsFactors = F)
+dat$classe <- factor(dat$classe)
+```
+I begin by partitioning the data into testing and training sets using R's `caret` package and then doing some basic data exploration.
+```{r}
+# Partition data
+set.seed(7)
+inTrain <- createDataPartition(y = dat$classe, p = 0.8, list = F)
+trainDat <- dat[inTrain, ]
+testDat <- dat[-inTrain, ]
+
+# Explore data
+dim(trainDat)
+names(trainDat)
+cls <- sapply(X = trainDat, FUN = class)
+table(cls) # Lots of character vector types
+```
+There are 160 variables in this data set and many of the variables that were read in as character vectors. To explore this further I create some indexes to help partition up the data into chunks by the variable type (characters and numbers).
+```{r}
+# Create index to partition variables
+iChar <- which(cls == "character")
+iNum <- which(cls == "integer" | cls == "numeric")
+```
+On a visual scan of the data I notices that many of the characrter variable type contain empty strings and #DIV/0! errors. In order to drill in to this I create some helper functions in R to count occurences of these error codes and empty strings. I aslo create a helper function to count NA's in the numeric data.
+```{r}
+findError <- function(col){
+    sum(col == "#DIV/0!")
+}
+sapply(X = trainDat[, iChar], FUN = findError) # DIV/0! error in most
+
+findBlank <- function(col){
+    sum(col == "")
+}
+sapply(X = trainDat[, iChar], FUN = findBlank) # Blanks in most
+
+countNA <- function(col){
+    sum(is.na(col))
+}
+sapply(X = trainDat[, iNum], FUN = countNA) # Lots of NAs in summarized variables
+```
+It is now clear that the character vectors were read in that way because nearly all contain the error codes or empty strings. The few that were not appear to be meta data and will be removed from the model buling process.
+```{r}
+str(trainDat[1:7])
+```
+Shown above, there were also many numeric variables with high NA counts. On closer inspection, the NA's, empty strings, and error codes appear to come from a subset of variables that were used to _summarize_ subsets of observations. Since these data are derived from the complete data - and are therefor superfluous - I remove them from the training data and keep only the complete numeric data. I do this by creating an index identifying only the numeric predictors that contain no NA's.
+```{r}
+# Keep numeric predictors with 0 NAs
+iPred <- sapply(X = trainDat[, iNum], FUN = countNA)
+iPred <- names(iPred[which(iPred == 0)])
+
+# Remove meta data from predictors
+iPred <- iPred[-c(1:4)] # Final predictors to use!
+str(trainDat[, iPred])
+
+# Cleanup workspace
+rm(dat, inTrain, cls, iChar, iNum, countNA, findBlank, findError)
+```
+I do a final check on my predictors to see if any of them have _near zero variance_ and are therefore useless.
+```{r}
+nearZeroVar(x = trainDat[, iPred], saveMetrics = T)
+```
+# Model Training
+The variable we are trying to predict in this data is `classe` which - as mentioned in the introduction - is a qualitative variable or 5 levels. Since I am aiming to predict a qualitative variable I use a bagged classification tree. Through experimentation I discover that I can retain a very high accuracy using only 10 bootstrapped resamples.
+```{r eval=FALSE}
+# Code not evaluated which you can run if you want to rebuild model
+# Training time approx 6 min with quad core parallel processing
+library(doParallel)
+registerDoParallel(cores=4)
+ctrl <- trainControl(number = 10, returnData = F, trim = T)
+mdlFit <- train(x = trainDat[, iPred], y = trainDat[, "classe"], method = "treebag",
+                trControl = ctrl, allowParallel = T)
+```
+
+```{r}
+# Load saved model
+load("./Code/mdlFit.Rdata")
+
+# Test model on testing partition
+pred <- predict(mdlFit, newdata = testDat)
+confusionMatrix(data = pred, reference = testDat$classe)
+```

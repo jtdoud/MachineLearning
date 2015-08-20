@@ -11,7 +11,8 @@ library(plyr)
 dat <- read.csv("./Data/pml-training.csv", stringsAsFactors = F)
 dat$classe <- factor(dat$classe)
 
-# Partition
+# Partition data
+set.seed(7)
 inTrain <- createDataPartition(y = dat$classe, p = 0.8, list = F)
 trainDat <- dat[inTrain, ]
 testDat <- dat[-inTrain, ]
@@ -53,34 +54,36 @@ iPred <- iPred[-c(1:4)] # Final predictors to use!
 
 rm(dat, inTrain, cls, iChar, iNum, countNA, findBlank, findError)
 
-# Model building
-nzv <- nearZeroVar(x = trainDat[, iPred], saveMetrics = T)
+# Model building ---------------------------------------------------
+nearZeroVar(x = trainDat[, iPred], saveMetrics = T)
 
 # tmp <- trainDat[sample(1:15699, size = 1000, replace = F), ] # Test on small size
 
-library(doParallel)
-registerDoParallel(cores=4)
-ctrl <- trainControl(number = 10, returnData = F, savePredictions = F, trim = T)
-mdlFit <- train(x = trainDat[, iPred], y = trainDat[, "classe"], method = "treebag",
-                trControl = ctrl, allowParallel = T)
-save(mdlFit, file = "./Code/mdlFit.Rdata", compress = T)
+# library(doParallel)
+# registerDoParallel(cores=4)
+# ctrl <- trainControl(number = 10, returnData = F, trim = T)
+# mdlFit <- train(x = trainDat[, iPred], y = trainDat[, "classe"], method = "treebag",
+#                 trControl = ctrl, allowParallel = T)
+# save(mdlFit, file = "./Code/mdlFit.Rdata", compress = T)
+
+load("./Code/mdlFit.Rdata")
 
 # Test model on Testing data
 pred <- predict(mdlFit, newdata = testDat)
 confusionMatrix(data = pred, reference = testDat$classe)
 
 # Test model on assignment sample
-finalTest <- read.csv("./Data/pml-testing.csv", stringsAsFactors = F)
-finalPred <- predict(mdlFit, newdata = finalTest)
-finalPred <- as.character(finalPred)
+# finalTest <- read.csv("./Data/pml-testing.csv", stringsAsFactors = F)
+# finalPred <- predict(mdlFit, newdata = finalTest)
+# finalPred <- as.character(finalPred)
 
 # Submission Files
-pml_write_files = function(x){
-    n = length(x)
-    for(i in 1:n){
-        filename = paste0("problem_id_",i,".txt")
-        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
-    }
-}
-setwd("~/GitHub/MachineLearning/Submission")
-pml_write_files(finalPred)
+# pml_write_files = function(x){
+#     n = length(x)
+#     for(i in 1:n){
+#         filename = paste0("problem_id_",i,".txt")
+#         write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+#     }
+# }
+# setwd("~/GitHub/MachineLearning/Submission")
+# pml_write_files(finalPred)
