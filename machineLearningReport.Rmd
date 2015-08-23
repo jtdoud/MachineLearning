@@ -1,0 +1,107 @@
+---
+title: "Practical Machine Learning Project"
+author: "Tucker Doud"
+date: "August 19, 2015"
+output: 
+  html_document: 
+    theme: spacelab
+---
+
+# Introduction
+The purpose of this project is to build a statistical model that will accurately predict the outcome class of a weightlifting exercise. The data used for model building was collected by fitting subjects with sensors and collecting the sensor data while they performed the exercise in five different ways. One of the ways was a correct execution (class A) and the remaining four ways were performed while making common mistakes (classes B,C,D and E.) More information about how the experiment and how the data was collected can be found [HERE.](http://groupware.les.inf.puc-rio.br/har)
+
+# Exploratory Data Analysis
+```{r SetUp, echo=FALSE, message=FALSE, warning=FALSE}
+library(caret)
+library(ipred)
+library(plyr)
+dat <- read.csv("./Data/pml-training.csv", stringsAsFactors = F)
+dat$classe <- factor(dat$classe) # Factor needed for model fit
+```
+I begin by partitioning the data into testing and training sets using R's `caret` package and then perform some basic data exploration.
+```{r Partition}
+# Partition Data
+set.seed(7) # For reproducability
+inTrain <- createDataPartition(y = dat$classe, p = 0.8, list = F)
+trainDat <- dat[inTrain, ]
+testDat <- dat[-inTrain, ]
+
+# Explore data
+dim(trainDat)
+# names(trainDat) # Commented out to shorten report. Uncomment to review.
+cls <- sapply(X = trainDat, FUN = class)
+table(cls)
+```
+There are 160 variables in this data set and many of the variables were read in by R as character vectors. Why does R read them in as character vectors when they appear to be mostly numbers? To explore this further I create some indexes to help partition the data - column wise - into subsets by the variable type (characters and numbers).
+```{r Index}
+# Create index to partition variables by type
+iChar <- which(cls == "character")
+iNum <- which(cls == "integer" | cls == "numeric")
+```
+On a visual scan of the data I notice that some of the character variable types contain empty strings `""` and `#DIV/0!` errors. I create some helper functions in R to count occurrences of the error codes and empty strings. I also create a helper function to count NA's in the numeric data.
+```{r Functions}
+findError <- function(col){
+    sum(col == "#DIV/0!")
+}
+sapply(X = trainDat[, iChar], FUN = findError) # Find DIV/0! errors
+
+findBlank <- function(col){
+    sum(col == "")
+}
+sapply(X = trainDat[, iChar], FUN = findBlank) # Find empty strings
+
+countNA <- function(col){
+    sum(is.na(col))
+}
+sapply(X = trainDat[, iNum], FUN = countNA) # Find NA's
+```
+It is now clear that the character vectors types were read in as such because nearly all contain error codes or empty strings. The few that were not appear to be meta data and will be removed from the model building process (shown below).
+```{r MetaData}
+str(trainDat[1:7]) # Meta data
+```
+In fact, there are several variables that are _mostly_ missing including many of the numeric vectors. The missing data look like they come from variables that were used to summarize subsets of observations. Notice that all have the same numbers of missing data (15,371). These variables are mostly missing except for some summarizing records. Since these data are not direct sensor data - but simply summarizing features - I remove them from the training data and keep only the complete numeric data. I do this by creating an index identifying only the numeric predictors `iPred` that contain no NA's.
+```{r Predictors}
+# Keep numeric predictors with 0 NAs
+iPred <- sapply(X = trainDat[, iNum], FUN = countNA)
+iPred <- names(iPred[which(iPred == 0)])
+
+# Remove meta data from predictors
+iPred <- iPred[-c(1:4)] # Final predictors to use!
+# str(trainDat[, iPred]) # Commented out to shorten report. Uncomment to review.
+
+# Cleanup workspace
+rm(dat, inTrain, cls, iChar, iNum, countNA, findBlank, findError)
+```
+There are 52 features that I will use for prediction in my final model. I do another check on my predictors to see if any of them have _near zero variance_ and therefore are of low predictive value.
+```{r NZV}
+nearZeroVar(x = trainDat[, iPred], saveMetrics = T)
+```
+None of the the predicting features show near zero variance so I continue to use all.
+
+# Model Training
+The variable we are trying to predict in this data is `classe` which - as mentioned in the introduction - is a qualitative variable with 5 levels. Since I am aiming to predict a qualitative response, I use a classification tree. Through experimentation with fitting multiple models, I discover that I can retain a very high accuracy using only 10 bootstrapped resamples. The code below fits a bootstrap aggregated classification tree to the training data set.
+```{r Training, eval=FALSE}
+# Code not evaluated but you can run if you want to rebuild model
+# Training time approx 6 min with quad core parallel processing
+library(doParallel)
+registerDoParallel(cores=4)
+ctrl <- trainControl(number = 10, returnData = F, trim = T)
+mdlFit <- train(x = trainDat[, iPred], y = trainDat[, "classe"], method = "treebag",
+                trControl = ctrl, allowParallel = T)
+```
+
+```{r LoadModel}
+# Load saved model to speed up knitting process
+load("./Code/mdlFit.Rdata") # Model not saved on github - too large
+print(mdlFit)
+```
+# Conclusion
+The initial model shows a very high accuracy on the training data but in order to get a more accurate representation of the out-of-sample error I need to use a different approach. The original data set contained nearly 20,000 observations so rather than using cross-validation in the training data to estimate the error, I held out a test partition of 20% of the data in the steps above. I can apply the model to the test partition of the data to get an estimation of the error without using cross-validation. [Note to graders.](https://class.coursera.org/predmachlearn-031/forum/thread?thread_id=128)
+
+See the results below for the performance of the model on the test data partition. The bagged classification tree preformed very well on the testing data. The overall accuracy was 99% when applied to the testing data. The model only misclassified 21 out of 3,923 observations in test set.
+```{r TestModel}
+# Test model on testing partition
+pred <- predict(mdlFit, newdata = testDat)
+confusionMatrix(data = pred, reference = testDat$classe)
+```
+
